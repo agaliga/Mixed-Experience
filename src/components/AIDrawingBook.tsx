@@ -292,26 +292,6 @@ const AIDrawingBook: React.FC<AIDrawingBookProps> = ({ onBack }) => {
                       )}
                     </button>
                   )}
-
-                  {!isTypingStory && story && (
-                    <button
-                      onClick={generateAndDownloadSideBySideImage}
-                      disabled={isGeneratingImage || selectedHistoryIndex === null}
-                      className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-purple-500 to-indigo-500 text-white rounded-lg font-bold shadow-lg hover:shadow-xl transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none text-sm"
-                    >
-                      {isGeneratingImage ? (
-                        <>
-                          <Loader size={16} className="animate-spin" />
-                          Creating...
-                        </>
-                      ) : (
-                        <>
-                          <Download size={16} />
-                          Image
-                        </>
-                      )}
-                    </button>
-                  )}
                 </div>
 
               </div>

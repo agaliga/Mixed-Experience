@@ -21,7 +21,6 @@ interface HistoryItem {
   prompt: string;
   story: string;
   storyImageBase64?: string;
-  compositeImageBase64?: string;
 } 
 
 export const useAIDrawingBookLogic = () => {
@@ -73,7 +72,6 @@ export const useAIDrawingBookLogic = () => {
   // Video generation state
   const [generatedAudioBlob, setGeneratedAudioBlob] = useState<Blob | null>(null);
   const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
   const [ffmpegLoaded, setFfmpegLoaded] = useState(false);
   const [ffmpegLoading, setFfmpegLoading] = useState(false);
 
@@ -601,213 +599,6 @@ export const useAIDrawingBookLogic = () => {
     setError(null);
   }, []);
 
-  // Helper function to draw the side-by-side composite image
-  const drawCompositeImage = (
-    ctx: CanvasRenderingContext2D,
-    canvas: HTMLCanvasElement,
-    storyImageBase64: string | null,
-    sketchBase64: string,
-    generatedBase64: string
-  ): Promise<void> => {
-    return new Promise((resolve) => {
-      // Fill background
-      ctx.fillStyle = '#1f2937';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      
-      // Enhanced drawing function from the preview
-      const drawImageWithBorder = (img: HTMLImageElement | null, x: number, y: number, width: number, height: number, borderColor: string, placeholderText: string) => {
-        // Draw background for the container
-        ctx.fillStyle = '#374151'; // gray-700
-        ctx.fillRect(x, y, width, height);
-
-        // Draw border
-        ctx.strokeStyle = borderColor;
-        ctx.lineWidth = 6; // Using a thicker border for better visibility
-        ctx.strokeRect(x, y, width, height);
-
-        // Draw image if available
-        if (img) {
-          const padding = 12; // Padding inside the border
-          const imgX = x + padding;
-          const imgY = y + padding;
-          const imgW = width - padding * 2;
-          const imgH = height - padding * 2;
-
-          // Calculate aspect ratio to fit image within the container without stretching
-          const containerRatio = imgW / imgH;
-          const imgRatio = img.width / img.height;
-
-          let drawW, drawH, drawX, drawY;
-
-          if (imgRatio > containerRatio) {
-            drawW = imgW;
-            drawH = imgW / imgRatio;
-            drawX = imgX;
-            drawY = imgY + (imgH - drawH) / 2;
-          } else {
-            drawH = imgH;
-            drawW = imgH * imgRatio;
-            drawX = imgX + (imgW - drawW) / 2;
-            drawY = imgY;
-          }
-          ctx.drawImage(img, drawX, drawY, drawW, drawH);
-        } else {
-          // Draw placeholder text if an image is not available
-          ctx.fillStyle = '#9ca3af'; // gray-400
-          ctx.font = '24px Arial';
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(placeholderText, x + width / 2, y + height / 2);
-        }
-      };
-      
-      // --- SIDE-BY-SIDE LAYOUT CALCULATIONS ---
-      const PADDING = 20;
-      const GAP = 20;
-      const CONTAINER_COUNT = 3;
-      
-      const TOTAL_GAPS_WIDTH = GAP * (CONTAINER_COUNT - 1);
-      const TOTAL_CONTENT_WIDTH = canvas.width - (PADDING * 2);
-      const BOX_WIDTH = (TOTAL_CONTENT_WIDTH - TOTAL_GAPS_WIDTH) / CONTAINER_COUNT;
-
-      const BOX_HEIGHT = canvas.height - (PADDING * 2);
-      const BOX_Y = PADDING;
-
-      // Load images
-      const loadImage = (src: string): Promise<HTMLImageElement | null> => {
-        return new Promise((resolve) => {
-          if (!src) {
-            resolve(null);
-            return;
-          }
-          const img = new Image();
-          img.onload = () => resolve(img);
-          img.onerror = () => resolve(null);
-          img.src = src;
-        });
-      };
-
-      Promise.all([
-        storyImageBase64 ? loadImage(`data:image/png;base64,${storyImageBase64}`) : Promise.resolve(null),
-        loadImage(`data:image/png;base64,${sketchBase64}`),
-        loadImage(`data:image/png;base64,${generatedBase64}`)
-      ]).then(([storyImageLoaded, sketchImageLoaded, genImageLoaded]) => {
-        // --- DRAWING CALLS ---
-        // Draw story image (left)
-        const storyX = PADDING;
-        drawImageWithBorder(storyImageLoaded, storyX, BOX_Y, BOX_WIDTH, BOX_HEIGHT, '#3b82f6', 'Story Image');
-
-        // Draw sketch image (middle)
-        const sketchX = PADDING + BOX_WIDTH + GAP;
-        drawImageWithBorder(sketchImageLoaded, sketchX, BOX_Y, BOX_WIDTH, BOX_HEIGHT, '#10b981', 'Sketch');
-        
-        // Draw generated image (right)
-        const generatedX = PADDING + (BOX_WIDTH * 2) + (GAP * 2);
-        drawImageWithBorder(genImageLoaded, generatedX, BOX_Y, BOX_WIDTH, BOX_HEIGHT, '#f59e0b', 'Generated Image');
-        
-        resolve();
-      });
-    });
-  };
-
-  // Generate composite image and store in history
-  const generateCompositeImage = async (historyIndex: number) => {
-    if (historyIndex < 0 || historyIndex >= history.length) return;
-    
-    const historyItem = history[historyIndex];
-    if (!historyItem.sketch || !historyItem.generated) return;
-
-    // Create canvas for the composite image
-    const canvas = document.createElement('canvas');
-    canvas.width = 1280;
-    canvas.height = 720;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    try {
-      await drawCompositeImage(
-        ctx,
-        canvas,
-        historyItem.storyImageBase64 || null,
-        historyItem.sketch,
-        historyItem.generated
-      );
-
-      // Convert to base64
-      const compositeImageBase64 = canvas.toDataURL('image/png').split(',')[1];
-
-      // Update history with composite image
-      setHistory(prev => 
-        prev.map((item, idx) => 
-          idx === historyIndex 
-            ? { ...item, compositeImageBase64 }
-            : item
-        )
-      );
-    } catch (error) {
-      console.error('Error generating composite image:', error);
-    }
-  };
-
-  // Generate and download side-by-side image
-  const generateAndDownloadSideBySideImage = async () => {
-    if (selectedHistoryIndex === null || !history[selectedHistoryIndex]) {
-      setError('Please select a drawing from your gallery first.');
-      return;
-    }
-
-    setIsGeneratingImage(true);
-    setError(null);
-
-    try {
-      const historyItem = history[selectedHistoryIndex];
-      let imageDataUrl: string;
-
-      // Check if composite image already exists
-      if (historyItem.compositeImageBase64) {
-        imageDataUrl = `data:image/png;base64,${historyItem.compositeImageBase64}`;
-      } else {
-        // Generate composite image on the fly
-        const canvas = document.createElement('canvas');
-        canvas.width = 1280;
-        canvas.height = 720;
-        const ctx = canvas.getContext('2d');
-        
-        if (!ctx) {
-          throw new Error('Could not create canvas context');
-        }
-
-        await drawCompositeImage(
-          ctx,
-          canvas,
-          historyItem.storyImageBase64 || null,
-          historyItem.sketch,
-          historyItem.generated
-        );
-
-        imageDataUrl = canvas.toDataURL('image/png');
-      }
-
-      // Download the image
-      const link = document.createElement('a');
-      link.href = imageDataUrl;
-      link.download = `ai-story-composite-${Date.now()}.png`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-
-      // Celebrate successful download
-      celebrateWithConfetti();
-      playWinSound();
-
-    } catch (error) {
-      console.error('Error generating side-by-side image:', error);
-      setError('Failed to generate side-by-side image. Please try again.');
-    } finally {
-      setIsGeneratingImage(false);
-    }
-  };
-
   // AI functions
   const getDrawingIdea = async () => {
     setIsGettingIdea(true);
@@ -1047,11 +838,6 @@ export const useAIDrawingBookLogic = () => {
               : item
           )
         );
-        
-        // Generate composite image after story is complete
-        setTimeout(() => {
-          generateCompositeImage(selectedHistoryIndex);
-        }, 100);
       }
     } catch (err: any) {
       console.error("Error generating story:", err);
@@ -1325,35 +1111,107 @@ const generateAndDownloadVideo = useCallback(async () => {
       audioDuration = Math.max(10, generatedAudioBlob.size / 16000);
     }
 
-    let layoutBlob: Blob;
+    // Create canvas for the video frame layout
+    const canvas = document.createElement('canvas');
+    canvas.width = 1280;
+    canvas.height = 720;
+    const ctx = canvas.getContext('2d');
+    
+    // Fill background
+    ctx.fillStyle = '#1f2937';
+    ctx.fillRect(0, 0, 1280, 720);
+    
+    // Create image loading promises
+    const loadImage = (src) => {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null); // Resolve null on error to not break Promise.all
+        img.src = src;
+      });
+    };
+    
+    // Load all images from the history item
+    const [storyImageLoaded, sketchImageLoaded, genImageLoaded] = await Promise.all([
+      historyItem.storyImageBase64 ? loadImage(`data:image/png;base64,${historyItem.storyImageBase64}`) : Promise.resolve(null),
+      loadImage(`data:image/png;base64,${historyItem.sketch}`),
+      loadImage(`data:image/png;base64,${historyItem.generated}`)
+    ]);
+    
+    // Enhanced drawing function from the preview
+    const drawImageWithBorder = (img, x, y, width, height, borderColor, placeholderText) => {
+        // Draw background for the container
+        ctx.fillStyle = '#374151'; // gray-700
+        ctx.fillRect(x, y, width, height);
 
-    // Check if composite image already exists
-    if (historyItem.compositeImageBase64) {
-      // Use existing composite image
-      const response = await fetch(`data:image/png;base64,${historyItem.compositeImageBase64}`);
-      layoutBlob = await response.blob();
-    } else {
-      // Generate composite image on the fly
-      const canvas = document.createElement('canvas');
-      canvas.width = 1280;
-      canvas.height = 720;
-      const ctx = canvas.getContext('2d');
-      
-      if (!ctx) {
-        throw new Error('Could not create canvas context');
-      }
+        // Draw border
+        ctx.strokeStyle = borderColor;
+        ctx.lineWidth = 6; // Using a thicker border for better visibility
+        ctx.strokeRect(x, y, width, height);
 
-      await drawCompositeImage(
-        ctx,
-        canvas,
-        historyItem.storyImageBase64 || null,
-        historyItem.sketch,
-        historyItem.generated
-      );
-      
-      // Convert canvas to blob to be used by FFmpeg
-      layoutBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-    }
+        // Draw image if available
+        if (img) {
+            const padding = 12; // Padding inside the border
+            const imgX = x + padding;
+            const imgY = y + padding;
+            const imgW = width - padding * 2;
+            const imgH = height - padding * 2;
+
+            // Calculate aspect ratio to fit image within the container without stretching
+            const containerRatio = imgW / imgH;
+            const imgRatio = img.width / img.height;
+
+            let drawW, drawH, drawX, drawY;
+
+            if (imgRatio > containerRatio) {
+                drawW = imgW;
+                drawH = imgW / imgRatio;
+                drawX = imgX;
+                drawY = imgY + (imgH - drawH) / 2;
+            } else {
+                drawH = imgH;
+                drawW = imgH * imgRatio;
+                drawX = imgX + (imgW - drawW) / 2;
+                drawY = imgY;
+            }
+            ctx.drawImage(img, drawX, drawY, drawW, drawH);
+        } else {
+            // Draw placeholder text if an image is not available
+            ctx.fillStyle = '#9ca3af'; // gray-400
+            ctx.font = '24px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(placeholderText, x + width / 2, y + height / 2);
+        }
+    };
+    
+    // --- SIDE-BY-SIDE LAYOUT CALCULATIONS ---
+    const PADDING = 20;
+    const GAP = 20;
+    const CONTAINER_COUNT = 3;
+    
+    const TOTAL_GAPS_WIDTH = GAP * (CONTAINER_COUNT - 1);
+    const TOTAL_CONTENT_WIDTH = canvas.width - (PADDING * 2);
+    const BOX_WIDTH = (TOTAL_CONTENT_WIDTH - TOTAL_GAPS_WIDTH) / CONTAINER_COUNT;
+
+    const BOX_HEIGHT = canvas.height - (PADDING * 2);
+    const BOX_Y = PADDING;
+
+    // --- DRAWING CALLS ---
+    // Draw story image (left)
+    const storyX = PADDING;
+    drawImageWithBorder(storyImageLoaded, storyX, BOX_Y, BOX_WIDTH, BOX_HEIGHT, '#3b82f6', 'Story Image');
+
+    // Draw sketch image (middle)
+    const sketchX = PADDING + BOX_WIDTH + GAP;
+    drawImageWithBorder(sketchImageLoaded, sketchX, BOX_Y, BOX_WIDTH, BOX_HEIGHT, '#10b981', 'Sketch');
+    
+    // Draw generated image (right)
+    const generatedX = PADDING + (BOX_WIDTH * 2) + (GAP * 2);
+    drawImageWithBorder(genImageLoaded, generatedX, BOX_Y, BOX_WIDTH, BOX_HEIGHT, '#f59e0b', 'Generated Image');
+    
+    // Convert canvas to blob to be used by FFmpeg
+    const layoutBlob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
     
     // Write layout image to FFmpeg's virtual file system
     ffmpeg.FS('writeFile', 'layout.png', await fetchFile(layoutBlob));
@@ -1597,11 +1455,9 @@ const generateAndDownloadVideo = useCallback(async () => {
     // Video generation
     generatedAudioBlob,
     isGeneratingVideo,
-    isGeneratingImage,
     ffmpegLoaded,
     ffmpegLoading,
     generateAndDownloadVideo,
-    generateAndDownloadSideBySideImage,
     
     // Drawing handlers
     startDrawing,
